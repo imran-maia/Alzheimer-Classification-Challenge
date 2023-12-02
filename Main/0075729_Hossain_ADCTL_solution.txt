@@ -1,0 +1,424 @@
+#*____________________________________________Import Libraries_______________________________________________*#
+# Import all the necessary libraries 
+library(tidyverse)
+library(tidymodels)
+library(caret)
+library(Metrics)
+library(mltools)
+library(nortest)
+library(usdm)
+library(devtools)
+install_github("vqv/ggbiplot")
+library(ggbiplot)
+library(glmnet)
+install.packages("Boruta")
+library(Boruta)
+library(pROC)
+
+#*___________________________________________Necessary Functions______________________________________________*#
+
+#*____________________________________________Data Pre-processing____________________________________________*#
+# Function for checking the dimension of the datafram
+get_dimension <- function(x){
+  # input: x = data
+  # output: dimension of data
+  return(dim(x)) 
+}  
+
+# Function for checking the balance condition of labels
+get_balanceInfo <- function(y){
+  # input: y = train labels
+  # output: info of train labels
+  
+  return(summary(train_labels))
+}
+
+# Function for checking colinearity of train predictors  
+get_colinearity <- function(x) {
+  # input: x = train predictors
+  # output: co-linear matrix
+  
+  colinearity <- vifcor(x)      # variance inflation factor (VIF) is used to check the co-linearity of predictors
+  return(colinearity)
+}
+
+# Function for computing correlation matrix of train predictors
+get_correlation_matrix <- function (x, t){
+  # input: x = train predictors
+  # output: x = train predictors with (<0.75 CF)
+  
+  corre_matrix <- cor(t)                             # get the correlation matrix
+  print(corre_matrix)                                # print the correlation matrix
+  index <- findCorrelation(corre_matrix, .75)        # select predictors who have more than 75% CF
+  remove_predictors <- colnames(corre_matrix)[index] # remove predictors having more than 75% CF from the correlation matrix
+  x <- x[!names(x) %in% remove_predictors]           # remove predictors with high CF from the train predictors 
+  return(x)  
+  
+}
+
+
+# Function for Lasso Regression feature selection
+get_lasso <- function(x, y, t){
+  # input: x = matrix of train predictors, y = train labels, t = train data
+  # output: t = train data after Lasso features selection
+  
+  cv.lasso <- cv.glmnet(x, y, family='binomial', alpha=1, parallel=TRUE, standardize=TRUE, type.measure='auc')
+  plot(cv.lasso)
+  plot(cv.lasso$glmnet.fit, xvar="lambda", label=TRUE)
+  cat('Min Lambda: ', cv.lasso$lambda.min, '\n 1_sd Lambda: ', cv.lasso$lambda.1se)  # find best lambda
+  df_coef <- round(as.matrix(coef(cv.lasso, s=cv.lasso$lambda.min)), 2)
+  df_coef <- df_coef[df_coef[, 1] == 0,]
+  t <- t[!names(t) %in% names(df_coef)] 
+  return(t)
+  
+}
+
+
+#*_______________________________________________Training Models______________________________________________*#
+
+# Controller for training models
+ctrl <- trainControl(method="cv", number = 10) 
+
+# Training Logistic Regression model
+fitting_lr_model <- function(x){
+  # input: train data (after features selection)
+  # output:
+  
+  lr_fit <- train(Label ~ ., 
+                  data = x, 
+                  method="glm", 
+                  trControl = ctrl, 
+                  preProcess = c("center", "scale"))
+  return(lr_fit)
+  
+}
+
+# Training Linear Discrinative Analysis (LDA) model
+fitting_lda_model <- function(x){
+  # input: train data (after features selection)
+  # output:
+  
+  lda_fit <- train(Label ~ ., 
+                   data = x, 
+                   method="lda", 
+                   trControl = ctrl, 
+                   preProcess = c("center", "scale"))
+  return(lda_fit)
+  
+}
+
+# Training Quadrature Discrinative Analysis (QDA) model
+fitting_qda_model <- function(x){
+  # input: train data (after features selection)
+  # output:
+  
+  qda_fit <- train(Label ~ ., 
+                   data = x, 
+                   method="qda", 
+                   trControl = ctrl, 
+                   preProcess = c("center", "scale"))
+  return(qda_fit)
+  
+}
+
+# Training K Nearest Nighbour (KNN) model
+fitting_knn_model <- function(x){
+  # input: train data (after features selection)
+  # output:
+  
+  knn_fit <- train(Label ~ ., 
+                   data = x, 
+                   method="knn", 
+                   trControl = ctrl, 
+                   preProcess = c("center", "scale"))
+  return(knn_fit)
+  
+}
+
+# Training Support Vector Machine Linear (SVM) model
+fitting_svm_lin_model <- function(x){
+  # input: train data (after features selection)
+  # output:
+  
+  svm_lin_fit <- train(Label ~ ., 
+                       data = x, 
+                       method="svmLinear", 
+                       trControl = ctrl, 
+                       preProcess = c("center", "scale"))
+  return(svm_lin_fit)
+  
+}
+
+# Training Support Vector Machine Radial (SVM) model
+fitting_svm_rad_model <- function(x){
+  # input: train data (after features selection)
+  # output:
+  
+  svm_rad_fit <- train(Label ~ ., 
+                       data = x, 
+                       method="svmRadial", 
+                       trControl = ctrl, 
+                       preProcess = c("center", "scale"))
+  return(svm_rad_fit)
+  
+}
+
+# Training Naive Bayes (NB) model
+fitting_nb_model <- function(x){
+  # input: train data (after features selection)
+  # output:
+  
+  nb_fit <- train(Label ~ ., 
+                  data = x, 
+                  method="nb", 
+                  trControl = ctrl, 
+                  preProcess = c("center", "scale"))
+  return(nb_fit)
+  
+}
+
+# Training Random Forest (RF) model
+fitting_rf_model <- function(x){
+  # input: train data (after features selection)
+  # output:
+  
+  rf_fit <- train(Label ~ ., 
+                  data = x, 
+                  method="rf", 
+                  trControl = ctrl, 
+                  preProcess = c("center", "scale"))
+  return(rf_fit)
+  
+}
+
+
+
+#*_______________________________________________Prediction Models____________________________________________*#
+
+# Function for predicting using different models
+prediciton_using_model <- function(x_fit, x){
+  # input:
+  # output:
+  
+  model_result <- predict(x_fit, x)
+  return(model_result)
+  
+}
+
+#*______________________________________________Computing Scores______________________________________________*#
+
+# Function for computing the AUC score
+auc_score <- function(x,x_pred){
+  
+  num_x_pred <- as.numeric(x_pred)
+  num_x <- as.numeric(x)
+  # Calculate the AUC
+  auc_obj <- roc(num_x,num_x_pred)
+  print("AUC Score")
+  auc_score <- auc(auc_obj)
+  print(auc_score)
+  
+}
+
+
+# Function for computing the MCC score
+mcc_score <- function(x, x_pred){
+  print("MCC score")
+  mcc_score <- mcc(x$Label, x_pred)
+  print(mcc_score)
+}
+
+# Function for computing the Confusion Matrix
+calculate_performance_metrics <- function(prediction_result, train_labels) {
+  confusion_matrix <- table(train_labels, prediction_result)
+  
+  # Calculate metrics
+  true_positives <- confusion_matrix[2, 2]
+  false_positives <- confusion_matrix[1, 2]
+  false_negatives <- confusion_matrix[2, 1]
+  true_negatives <- confusion_matrix[1, 1]
+  
+  accuracy <- (true_positives + true_negatives) / sum(confusion_matrix)
+  sensitivity <- true_positives / (true_positives + false_negatives)
+  specificity <- true_negatives / (true_negatives + false_positives)
+  precision <- true_positives / (true_positives + false_positives)
+  f1_score <- 2 * precision * sensitivity / (precision + sensitivity)
+  ba_score <- (sensitivity + specificity) / 2
+  
+  # Create a named vector of results
+  results <- c(
+    "Accuracy" = accuracy,
+    "Sensitivity" = sensitivity,
+    "Specificity" = specificity,
+    "Precision" = precision,
+    "F1 Score" = f1_score,
+    "Balanced Accuracy" = ba_score
+  )
+  
+  return(results)
+}
+
+
+
+#*__________________________________________________End of Functions__________________________________________*#
+
+
+# Set the working directory where all the files are located
+setwd("D:\\Erasmus Mundus Masters\\University of Cassino\\Statistical Learning and Data Mining\\Project\\Alzheimer Classification Challenge\\Dataset")
+
+#*___________________________________________________Data Loading_____________________________________________*#
+set.seed(123)
+# Importing the train and test dataset from the directory as datafram
+train_data <- read.csv("ADCTLtrain.csv")
+test_data <- read.csv("ADCTLtest.csv")
+
+# Extracting the patient id from the dataset
+patient_ids <- train_data$ID
+test_patient_ids <- test_data$ID
+
+# Removing the patient id from both train and test dataset
+train_data <- subset(train_data, select = -ID)
+test_data <- subset(test_data, select = -ID)
+
+# Extracting the predictors and labels from the train dataset
+train_labels = train_data$Label 
+train_predictors = train_data[, -ncol(train_data)]
+
+# Encoding categorical labels using two level factor
+train_data$Label <- factor(train_data$Label)
+train_labels <- factor(train_labels)
+
+#*______________________________________________Data Pre-processing___________________________________________*#
+
+# Computing colinearity and removing problematic features from the dataset
+colinear_problem_predictors = get_colinearity(train_predictors)  
+colinear_reduced_train_data <- train_data[, !(names(train_data) %in% colinear_problem_predictors@excluded)]
+
+# Computing correlation matrix and removing correlated features from the dataset
+corre_reduced_train_data <- get_correlation_matrix(colinear_reduced_train_data, train_predictors)
+
+
+# Principle Component Analysis (PCA) feature selection 
+pca <- prcomp(train_predictors)
+variance_explained <- pca$sdev^2 / sum(pca$sdev^2)
+cumulative_variance <- cumsum(variance_explained)
+num_components <- sum(cumulative_variance <= 0.95)  # Adjust the threshold as n
+pca_selected_components <- pca$x[, 1:num_components]
+pca_selected_components <- as.data.frame(pca_selected_components)
+pca_reduced_train_data <- pca_selected_components
+
+# Boruta feature selection
+boruta_output <- Boruta(as.matrix(corre_reduced_train_data), train_labels, doTrace = 2)
+boruta_selected_features <- getSelectedAttributes(boruta_output, withTentative = FALSE)
+boruta_reduced_train_data <- corre_reduced_train_data[, boruta_selected_features]
+#boruta_reduced_train_data <- cbind(train_predictors_boruta, train_labels)
+#names(boruta_reduced_train_data)[ncol(boruta_reduced_train_data)] <- "Label"
+
+
+# Lasso Regression feature selection 
+lasso_reduced_train_data <- get_lasso(as.matrix(train_predictors), train_labels, corre_reduced_train_data)
+
+
+# Check the dimension of the dataset after feature selection
+dim(train_data)
+dim(colinear_reduced_train_data)
+dim(corre_reduced_train_data)
+dim(pca_reduced_train_data)
+dim(boruta_reduced_train_data)
+dim(lasso_reduced_train_data )
+
+
+#*_______________________________________________Train Models_________________________________________________*#
+
+
+# Assign a new variable for fitting and predicting data into models
+train_data_for_models <- boruta_reduced_train_data 
+
+
+#*_________________________________________Logistic Regression (LR)___________________________________________*#
+lr_fit<- fitting_lr_model(train_data_for_models)
+lr_prediction_result<- prediciton_using_model(lr_fit, train_data_for_models)
+mcc_score(train_data_for_models, lr_prediction_result)
+auc_score(train_data_for_models$Label, lr_prediction_result)
+
+#*_______________________________________K Nearest Neighbors  (KNN)___________________________________________*#
+knn_fit<- fitting_knn_model(train_data_for_models)
+knn_prediction_result<- prediciton_using_model(knn_fit, train_data_for_models)
+mcc_score(train_data_for_models, knn_prediction_result)
+auc_score(train_data_for_models$Label, knn_prediction_result)
+
+#*_________________________________Linear Discriminant Analysis (LDA)_________________________________________*#
+lda_fit<- fitting_lda_model(train_data_for_models)
+lda_prediction_result<- prediciton_using_model(lda_fit, train_data_for_models)
+mcc_score(train_data_for_models, lda_prediction_result)
+auc_score(train_data_for_models$Label, lda_prediction_result)
+
+#*_________________________________Quadratic Discriminant Analysis (QDA)______________________________________*#
+qda_fit<- fitting_qda_model(train_data_for_models)
+qda_prediction_result<- prediciton_using_model(qda_fit, train_data_for_models)
+mcc_score(train_data_for_models, qda_prediction_result)
+auc_score(train_data_for_models$Label, qda_prediction_result)
+
+#*________________________________Support Vector Machine (SVM_Linear)_________________________________________*#
+svm_lin_fit<- fitting_svm_lin_model(train_data_for_models)
+svm_lin_prediction_result<- prediciton_using_model(svm_lin_fit, train_data_for_models)
+mcc_score(train_data_for_models, svm_lin_prediction_result)
+auc_score(train_data_for_models$Label, svm_lin_prediction_result)
+
+#*________________________________Support Vector Machine (SVM_Radial)_________________________________________*#
+svm_rad_fit<- fitting_svm_rad_model(train_data_for_models)
+svm_rad_prediction_result<- prediciton_using_model(svm_rad_fit, train_data_for_models)
+mcc_score(train_data_for_models, svm_rad_prediction_result)
+auc_score(train_data_for_models$Label, svm_rad_prediction_result)
+
+#*___________________________________________Naive Bayes______________________________________________________*#
+nb_fit<- fitting_nb_model(train_data_for_models)
+nb_prediction_result<- prediciton_using_model(nb_fit, train_data_for_models)
+mcc_score(train_data_for_models, nb_prediction_result)
+auc_score(train_data_for_models$Label, nb_prediction_result)
+
+#*________________________________________Random Forest(RF)___________________________________________________*#
+rf_fit<- fitting_rf_model(train_data_for_models)
+rf_prediction_result<- prediciton_using_model(rf_fit, train_data_for_models)
+mcc_score(train_data_for_models, rf_prediction_result)
+auc_score(train_data_for_models$Label, rf_prediction_result)
+
+
+
+#*__________________________________Prediction Result and File Import_________________________________________*#
+
+
+# Define the best prediction model, best prediction result using train data, and best feature selection method 
+best_model <- qda_fit
+best_prediciton_result <- qda_prediction_result
+best_predictor_selction_model <- lasso_reduced_train_data
+
+# Compute the performance matrix of the best prediction result using train data
+performance_metrics <- calculate_performance_metrics(best_prediciton_result, train_labels)
+print(performance_metrics)
+
+# Prediction of the test data using best classification model
+
+best_test_result <- prediciton_using_model(best_model, test_data)
+best_test_result <- as.data.frame(best_test_result)
+best_test_result <-cbind(test_patient_ids,best_test_result)
+colnames(best_test_result) <- c("ID", "Label")
+
+
+# Compute the probabilities of the prediction of the test data using best model 
+predicted_probabilities_df <- predict(best_model, newdata = test_data, type = "prob")
+predicted_probabilities_df <- as.data.frame(predicted_probabilities_df)
+predicted_probabilities_df <- round(predicted_probabilities_df,digits = 3)
+colnames(predicted_probabilities_df) <- paste("Prob", colnames(predicted_probabilities_df), sep = "_")
+best_test_result_with_prob <- cbind(best_test_result, predicted_probabilities_df)
+
+
+# Save the prediction result of the test data using best model as a CSV file with comma as the separator
+write.csv(best_test_result_with_prob, file = "0075729_Hossain_ADCTLres", row.names = FALSE)
+
+# Save the predictors of the best feature selection model as a CSV file with comma as the separator
+best_predictor_selction_model <- best_predictor_selction_model[, -ncol(best_predictor_selction_model)]
+write.csv(best_predictor_selction_model, file = "0075729_Hossain_ADCTLfeat", row.names = FALSE)
+
+#*__________________________________________End of the Project_______________________________________________*#
+#*___________________________________________ Md Imran Hossain_______________________________________________*#
